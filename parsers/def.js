@@ -67,7 +67,7 @@ function parseSync(filepath) {
 		const key = match[3]
 
 		if(implicitMeta && (type === 'count' || type === 'offset')) {
-			log.warn(`[parsers/def] parse warning: "count" or "offset" encountered, disabling implicit metatypes\n    at "${filepath}", line ${i + 1}`)
+			log.debug(`[parsers/def] parse warning: "count" or "offset" encountered, disabling implicit metatypes\n    at "${filepath}", line ${i + 1}`)
 			implicitMeta = false
 		}
 

@@ -2,8 +2,7 @@
 	"name": "tera-data-parser",
 	"version": "0.1.0",
 	"dependencies": {
-		"baldera-logger": "^0.1.0",
-		"long": "github:pinkipi/bigint-long.js",
+		"log": "github:pinkipi/log",
 		"tera-vec3": "github:tera-proxy/tera-vec3"
 	},
 	"description": "Library for parsing and manipulating TERA packets.",

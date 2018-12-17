@@ -262,7 +262,7 @@ class TeraProtocol {
 			messages.get(name).set(version, definition)
 
 			if (!mappedMessages.has(name)) {
-				log.warn(`[protocol] load - unmapped message "${name}"`)
+				log.debug(`[protocol] load - unmapped message "${name}"`)
 			}
 		}
 
@@ -319,7 +319,7 @@ class TeraProtocol {
 				while (next && index < length) {
 					let pos = reader.position
 					if (pos !== next) {
-						log.warn(`[protocol] parse - ${displayName}: offset mismatch for array "${keyPath}" at ${reader.position} (expected ${next})`)
+						log.debug(`[protocol] parse - ${displayName}: offset mismatch for array "${keyPath}" at ${reader.position} (expected ${next})`)
 						reader.seek(next)
 						pos = next
 					}
@@ -363,7 +363,7 @@ class TeraProtocol {
 								throw new Error(`${displayName}.${keyPath}: invalid offset for "${keyPath}" at ${reader.position} (inside header)`)
 							}
 							if (reader.position !== ofs) {
-								log.warn(`[protocol] parse - ${displayName}: offset mismatch for "${keyPath}" at ${reader.position} (expected ${ofs})`)
+								log.debug(`[protocol] parse - ${displayName}: offset mismatch for "${keyPath}" at ${reader.position} (expected ${ofs})`)
 								reader.seek(ofs)
 							}
 						}

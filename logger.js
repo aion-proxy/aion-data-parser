@@ -1,1 +1,1 @@
-module.exports = require('baldera-logger')('tera-data-parser')
+module.exports = require('log')('tera-data-parser')
