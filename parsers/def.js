@@ -1,116 +1,119 @@
 'use strict'
 
-const fs = require('fs')
-const log = require('../logger')
+const fs = require('fs'),
+	path = require('path')
 
-// helper functions
-const META_TYPES = {
-	array: ['count', 'offset'],
-	bytes: ['offset', 'count'],
-	string: ['offset']
-}
+function parse(str, includeDir) {
+	const lines = str.split(/\r?\n/),
+		root = ['object', []],
+		stack = [root[1]]
 
-function pushMetaTypes(base, key, type) {
-	const metaTypes = META_TYPES[type]
-	if(!metaTypes) return
+	let includeCount = 0,
+		target = stack[0]
 
-	// get key path
-	let ref = base
-	const keyPath = [key]
-	while(ref.type === 'object') {
-		keyPath.unshift(ref.name)
-		ref = ref.up
-	}
-	const kp = keyPath.join('.')
+	str = null // garbage collect
 
-	//
-	for(const t of metaTypes) {
-		ref.meta.push([kp, t])
-	}
-}
+	for(let i = 0; i < lines.length; i++) {
+		try {
+			const line = lines[i].replace(/#.*$/, '').trim()
+			if(!line) continue // Ignore empty lines
 
-function flatten(def, implicitMeta = true) {
-	const obj = [].concat(
-		implicitMeta ? def.meta : [],
-		def.map(([k, t]) => [k, Array.isArray(t) ? flatten(t, implicitMeta) : t])
-	)
-	obj.type = def.type
-	return obj
-}
+			{
+				const match = line.match(/^@include\s+(.+)$/)
+				if(match) {
+					if(!includeDir) throw Error('No include directory specified')
+					if(++includeCount > 5) throw Error('Too many includes') // Prevents infinite loops
 
-// main
-function parseSync(filepath) {
-	log.trace(`[parsers/def] reading "${filepath}"`)
-
-	const data = fs.readFileSync(filepath, { encoding: 'utf8' }).split(/\r?\n/)
-
-	const definition = []
-	let implicitMeta = true
-	let level = 0
-	let top = definition // pointer to current level
-	top.meta = []
-	top.type = 'root'
-
-	for(let i = 0; i < data.length; i++) {
-		// clean line
-		const line = data[i].replace(/#.*$/, '').trim()
-		if(!line) continue
-
-		const match = line.match(/^((?:-\s*)*)(\S+?)(?:<\s*(\S+)\s*>)?(?:\[\s*\S+\s*\])?\s+(\S+)$/)
-		if(!match) {
-			log.warn(`[parsers/def] parse error: malformed line\n    at "${filepath}", line ${i + 1}`)
-			continue
-		}
-
-		const depth = match[1].replace(/[^-]/g, '').length
-		const type = match[2]
-		const arrayType = match[3]
-		const key = match[4]
-
-		if(implicitMeta && (type === 'count' || type === 'offset')) {
-			log.debug(`[parsers/def] parse warning: "count" or "offset" encountered, disabling implicit metatypes\n    at "${filepath}", line ${i + 1}`)
-			implicitMeta = false
-		}
-
-		// check if we need to move up or down a level
-		// move deeper
-		if(depth > level) {
-			level++
-
-			// sanity check
-			if(depth !== level) {
-				log.warn(`[parsers/def] parse warning: array nesting too deep\n    at "${filepath}", line ${i + 1}`)
+					lines.splice(i--, 1, ...fs.readFileSync(path.join(includeDir, match[1]), 'utf8').split(/\r?\n/))
+					continue
+				}
 			}
 
-			// we are defining the subfields for the last field we saw,
-			// so move current level to the `type` value (2nd elem) of the last field
-			top = top[top.length - 1][1]
-		// move up
-		} else {
-			// pop the stack to match the correct depth
-			while(depth < level) {
-				top = top.up
-				level--
+			const match = line.match(/^((?:-\s*)*)(\S+)\s+(\S+?)(?:=(\S+))?(?:\s+\^([^-]+)(?:-(\S+))?)?$/)
+			if(!match) throw Error('Malformed line')
+
+			const depth = match[1].replace(/[^-]/g, '').length + 1,
+				typeInfo = parseType(match[2]),
+				key = match[3],
+				init = match[4] || null,
+				version = [Number(match[5]) || 0, Number(match[6]) || Infinity]
+
+			if(depth > stack.length) {
+				const inner = getInnerType(target[target.length - 1]),
+					props = []
+
+				inner[1] = inner[0] === 'object' ? props : ['object', props]
+				stack.push(props)
+				target = stack[stack.length - 1]
+
+				if(depth > stack.length) throw Error('Array nesting too deep')
 			}
+			else {
+				while(depth < stack.length) stack.pop()
+				target = stack[stack.length - 1]
+			}
+
+			getInnerType(typeInfo).push(init)
+			target.push([key, typeInfo, version])
 		}
-
-		// append necessary metadata fields
-		pushMetaTypes(top, key, type)
-
-		// append the field to the current level
-		if(type === 'array' || type === 'object') {
-			const group = []
-			group.type = arrayType || type
-			group.name = key
-			group.up = top
-			group.meta = []
-			top.push([key, group])
-		} else {
-			top.push([key, type])
+		catch(e) {
+			e.message += ` (line ${i + 1})`
+			throw e
 		}
 	}
 
-	return flatten(definition, implicitMeta)
+	return root
 }
 
-module.exports = parseSync
+function compile(root, proto) {
+	return proto.compile(cloneType(root, proto.gameVersion))
+}
+
+// [type, subType]
+function cloneType(arr, gameVersion) {
+	if(!arr) return null
+	const out = [arr[0], (arr[0] === 'object' ? cloneProps : cloneType)(arr[1], gameVersion)]
+	if(arr[2]) out.push(arr[2])
+	return out
+}
+
+// [field1, field2, ...]
+function cloneProps(arr, gameVersion) {
+	if(!arr) return null
+	return arr
+		.filter(field => gameVersion >= field[2][0] && gameVersion < field[2][1])
+		.map(field => cloneField(field, gameVersion))
+}
+
+// [key, typeInfo, versionInfo]
+function cloneField(arr, gameVersion) {
+	return [arr[0], cloneType(arr[1], gameVersion)] // Omit versionInfo
+}
+
+function parseType(str) {
+	const self = [str, null]
+	let outer = self,
+		match = null
+
+	while(match = /\[(\d+)\]$/.exec(str)) { // Fixed-length array(s)
+		outer = [Number(match[1]), outer]
+		str = str.slice(0, match.index)
+	}
+
+	if(match = /<(\S+)>$/.exec(str)) { // Nested type
+		self[1] = parseType(match[1])
+		str = str.slice(0, match.index)
+	}
+
+	self[0] = str
+
+	return outer
+}
+
+function getInnerType(typeInfo) {
+	while(typeInfo[0] !== 'object' && typeInfo[1]) typeInfo = typeInfo[1]
+
+	return typeInfo
+}
+
+module.exports = { parse, compile }
